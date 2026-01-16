@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from openpyxl.styles import Font, Border, Side
+from openpyxl.styles import Font, Border, Side, Alignment
+from datetime import datetime
 
 st.set_page_config(page_title="信天翁物流轉換器", layout="wide")
 st.title("📦 信天翁 TO MO_Manifest 自動轉換系統")
@@ -11,8 +12,9 @@ general = st.file_uploader("2. 上傳【一般】檔案", type=["xls", "xlsx"])
 
 if lian_yu and general:
     try:
-        # --- 1. 處理【一般】文件 (作為資料來源庫) ---
-        df_gen_raw = pd.read_excel(general)
+        # --- 1. 處理【一般】文件 ---
+        # 指定特定欄位為字串，防止數字變形
+        df_gen_raw = pd.read_excel(general, dtype={'PostCode': str, 'CONSIGNEE\'S TEL': str})
         gen_headers = ["NO.", "HAWB / CN", "Marking", "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", 
                        "PostCode", "COD", "CONSIGNEE'S TEL", "PCS", "WT (KG)", "DESCRIPTION", 
                        "VALUE (USD)", "BAG NO.", "SHORT NAME"]
@@ -21,8 +23,9 @@ if lian_yu and general:
         search_db = df_gen_raw.set_index('HAWB / CN')
 
         # --- 2. 處理【聯郵】文件 ---
-        df_customs = pd.read_excel(lian_yu, sheet_name='報關明細')
-        df_no_customs = pd.read_excel(lian_yu, sheet_name='不報關-X7明細')
+        # 強制指定 N欄(單價) 和 S欄(統計方式) 為字串
+        df_customs = pd.read_excel(lian_yu, sheet_name='報關明細', dtype={'單價(TWD)': str, '統計方式': str})
+        df_no_customs = pd.read_excel(lian_yu, sheet_name='不報關-X7明細', dtype={'單價(TWD)': str, '統計方式': str})
         
         df_no_customs.iloc[:, 0] = "" 
         if not df_no_customs.empty:
@@ -55,27 +58,32 @@ if lian_yu and general:
         df_final_export = pd.concat([df_final_export, combined_lian_yu], join='outer').fillna('')
         df_final_export = df_final_export[final_cols_x]
 
-        # --- 5. 產出檔案並設定 Arial 10 與無框線 ---
+        # --- 5. 產出檔案與樣式設定 ---
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_final_export.to_excel(writer, sheet_name='出口總明細', index=False)
             df_gen_raw.to_excel(writer, sheet_name='一般', index=False)
             
-            # 設定樣式
             for sheetname in ['出口總明細', '一般']:
                 worksheet = writer.sheets[sheetname]
-                # 定義無邊框樣式
                 no_border = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
-                # 定義字體
                 arial_font = Font(name='Arial', size=10)
+                right_align = Alignment(horizontal='right')
                 
-                for row in worksheet.iter_rows():
+                for r_idx, row in enumerate(worksheet.iter_rows()):
                     for cell in row:
                         cell.font = arial_font
                         cell.border = no_border
+                        # 如果是第一列(標題)，設定靠右對齊
+                        if r_idx == 0:
+                            cell.alignment = right_align
 
-        st.success("✅ 處理完成！字體已設定為 Arial 10，且移除了所有框線。")
-        st.download_button(label="📥 下載最終對齊版檔案", data=output.getvalue(), file_name="信天翁_格式美化版.xlsx")
+        # 取得今天日期作為檔名
+        today_str = datetime.now().strftime("%Y%m%d")
+        final_filename = f"{today_str}_信天翁 TO MO_Manifest.xlsx"
+
+        st.success("✅ 處理完成！")
+        st.download_button(label="📥 下載轉換後的檔案", data=output.getvalue(), file_name=final_filename)
 
     except Exception as e:
         st.error(f"發生錯誤: {e}")
