@@ -3,11 +3,12 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.styles import Font, Border, Side, Alignment
 from datetime import datetime
+import urllib.parse
 
 # 1. 網頁基本設定
 st.set_page_config(page_title="信天翁系統", layout="centered")
 
-# 自定義 CSS：換成黑底風格，並修復按鈕顏色
+# 自定義 CSS：維持黑底風格與純白上傳框
 st.markdown("""
     <style>
     /* 全域背景：深黑色 */
@@ -51,7 +52,7 @@ st.markdown("""
         font-size: 16px !important;
     }
 
-    /* 「信天翁文件產出」與「下載」按鈕：白底、黑字、黑邊 */
+    /* 按鈕樣式：白底、黑字、黑邊 */
     div.stButton > button {
         background-color: #FFFFFF !important;
         color: #000000 !important;
@@ -61,18 +62,26 @@ st.markdown("""
         font-weight: bold;
         width: 100%;
     }
-    /* 按鈕內的文字強制黑色 */
-    div.stButton > button p {
+    /* Gmail 按鈕加強綠色邊框區別 */
+    .email-btn {
+        display: inline-block;
+        width: 100%;
+        text-align: center;
+        background-color: #FFFFFF;
         color: #000000 !important;
+        border: 2px solid #28A745;
+        padding: 12px;
+        font-size: 18px;
+        font-weight: bold;
+        text-decoration: none;
+        border-radius: 5px;
+        margin-top: 10px;
     }
-    div.stButton > button:hover {
-        background-color: #EEEEEE !important;
-    }
+    
+    div.stButton > button p { color: #000000 !important; }
+    div.stButton > button:hover { background-color: #EEEEEE !important; }
 
-    /* 檔案確認標題：白色 */
     h3 { color: #FFFFFF !important; }
-
-    /* 強制所有 Markdown 文字為白色 */
     .stMarkdown p, .stMarkdown span, label { color: #FFFFFF !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -112,12 +121,12 @@ with col2:
     else:
         st.info("⬜ 聯郵文件：待上傳")
 
-# 4. 產出邏輯
+# 4. 產出與 Gmail 邏輯
 if has_general and has_lian_yu:
     st.write("---")
     if st.button("🚀 信天翁文件產出", use_container_width=True):
         try:
-            with st.spinner('正在分析報關種類並進行精確對位...'):
+            with st.spinner('正在分析報關人並計算件數...'):
                 # --- A. 讀取一般文件 ---
                 df_gen_raw = pd.read_excel(gen_file_data, dtype=str).fillna('')
                 gen_headers = ["NO.", "HAWB / CN", "Marking", "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "COD", "CONSIGNEE'S TEL", "PCS", "WT (KG)", "DESCRIPTION", "VALUE (USD)", "BAG NO.", "SHORT NAME"]
@@ -135,12 +144,31 @@ if has_general and has_lian_yu:
                 combined['提單號碼'] = combined['提單號碼'].str.strip()
                 combined = combined[(combined['提單號碼'] != '') & (combined['提單號碼'] != 'nan')]
 
-                def format_price(val):
-                    try: return "{:.2f}".format(float(val)) if val and val != 'nan' else ""
-                    except: return val
-                combined['單價(TWD)'] = combined['單價(TWD)'].apply(format_price)
+                # --- C. 件數統計邏輯 (核心需求) ---
+                stats_positive = {} # 存放正報人與件數
+                current_sender = None
+                
+                for _, row in combined.iterrows():
+                    val_a = str(row['報關']).strip()
+                    val_p = str(row['寄件人']).strip()
+                    
+                    # 判定是否為正報組別起始
+                    if "正式報關" in val_a or "合併正報" in val_a:
+                        current_sender = val_p if val_p != "" else "未知廠商"
+                        if current_sender not in stats_positive:
+                            stats_positive[current_sender] = 0
+                    
+                    # 只要處於正報區間且非不報關，就累計件數
+                    if current_sender and "不報關" not in val_a:
+                        stats_positive[current_sender] += 1
+                    elif "不報關" in val_a:
+                        current_sender = None
 
-                # --- C. 跨表比對 ---
+                pos_summary = "、".join([f"{name} {count} 件" for name, count in stats_positive.items()])
+                count_no = len(df_no_customs)
+                total_count = len(combined)
+
+                # --- D. 跨表比對 ---
                 def lookup_info(row):
                     hawb = row['提單號碼']
                     if hawb in search_db.index:
@@ -151,7 +179,7 @@ if has_general and has_lian_yu:
 
                 combined[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = combined.apply(lookup_info, axis=1)
 
-                # --- D. 報關種類插入空行邏輯 ---
+                # --- E. 產出檔案 ---
                 final_cols_x = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
                 
                 spaced_rows = []
@@ -164,13 +192,11 @@ if has_general and has_lian_yu:
                     display_row = row.copy()
                     if current_type == "不報關" and last_type == "不報關":
                         display_row['報關'] = ""
-                    
                     spaced_rows.append(display_row)
                     last_type = current_type
 
                 df_final_export = pd.DataFrame(spaced_rows).fillna('')[final_cols_x]
 
-                # --- E. 產出單一頁籤 Excel ---
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     df_final_export.to_excel(writer, sheet_name='出口總明細', index=False)
@@ -178,14 +204,35 @@ if has_general and has_lian_yu:
                     for r_idx, row in enumerate(ws.iter_rows()):
                         for cell in row:
                             cell.font = Font(name='Arial', size=10)
-                            cell.border = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
-                            if r_idx == 0:
-                                cell.alignment = Alignment(horizontal='left')
+                            if r_idx == 0: cell.alignment = Alignment(horizontal='left')
 
                 today_str = datetime.now().strftime("%Y%m%d")
                 st.balloons()
-                st.success("✅ 處理完成！")
+                st.success("✅ 處理完成！件數已自動計算。")
+                
+                # 下載按鈕
                 st.download_button(label="📥 下載轉換後的信天翁檔案", data=output.getvalue(), file_name=f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
+
+                # --- F. Gmail 發信連結功能 ---
+                recipients = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
+                cc_list = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
+                email_subject = f"{today_str} 信天翁 to MO (出口明細)"
+                
+                email_body = (
+                    f"Dears\n\n"
+                    f"今日出口明細如附檔，共 {total_count} 件\n"
+                    f"請再協助申報，並安排出口，謝謝\n\n"
+                    f"正報：{pos_summary}\n"
+                    f"不報關： {count_no} 件"
+                )
+                
+                mailto_url = f"https://mail.google.com/mail/?view=cm&fs=1" \
+                             f"&to={recipients}" \
+                             f"&cc={cc_list}" \
+                             f"&su={urllib.parse.quote(email_subject)}" \
+                             f"&body={urllib.parse.quote(email_body)}"
+                
+                st.markdown(f'<a href="{mailto_url}" target="_blank" class="email-btn">📧 開啟 Gmail (自動填妥收件人與內容)</a>', unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"發生錯誤: {e}")
