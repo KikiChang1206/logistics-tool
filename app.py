@@ -8,7 +8,7 @@ import urllib.parse
 # 1. 網頁基本設定
 st.set_page_config(page_title="信天翁系統", layout="centered")
 
-# 自定義 CSS
+# 自定義 CSS (保持黑底風格)
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
@@ -36,71 +36,53 @@ gen_file = lian_file = None
 
 if uploaded_files:
     for f in uploaded_files:
-        if "一般" in f.name:
-            has_gen, gen_file = True, f
-        elif "聯郵" in f.name:
-            has_lian, lian_file = True, f
+        if "一般" in f.name: has_gen, gen_file = True, f
+        elif "聯郵" in f.name: has_lian, lian_file = True, f
 
-# --- 修正後的狀態檢查清單 ---
+# 檔案狀態確認
 st.write("### 📁 檔案狀態確認")
 c1, c2 = st.columns(2)
 with c1:
-    if has_gen:
-        st.success("✅ 一般文件：就緒")
-    else:
-        st.info("⬜ 一般文件：待上傳")
-
+    if has_gen: st.success("✅ 一般文件：就緒")
+    else: st.info("⬜ 一般文件：待上傳")
 with c2:
-    if has_lian:
-        st.success("✅ 聯郵文件：就緒")
-    else:
-        st.info("⬜ 聯郵文件：待上傳")
+    if has_lian: st.success("✅ 聯郵文件：就緒")
+    else: st.info("⬜ 聯郵文件：待上傳")
 
 if has_gen and has_lian:
     st.write("---")
     if st.button("🚀 信天翁文件產出", use_container_width=True):
         try:
-            # A. 讀取一般文件
+            # A. 讀取與處理資料 (邏輯維持先前版本)
             df_gen = pd.read_excel(gen_file, dtype=str).fillna('')
             gen_headers = ["NO.", "HAWB / CN", "Marking", "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "COD", "CONSIGNEE'S TEL", "PCS", "WT (KG)", "DESCRIPTION", "VALUE (USD)", "BAG NO.", "SHORT NAME"]
             df_gen.columns = gen_headers[:len(df_gen.columns)]
             search_db = df_gen.set_index('HAWB / CN')
 
-            # B. 讀取聯郵檔案
             df_cust = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
             df_no_sheet = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
             df_no_sheet['報關'] = "不報關"
             
-            # 合併處理
             combined = pd.concat([df_cust, df_no_sheet], ignore_index=True)
             combined['提單號碼'] = combined['提單號碼'].str.strip()
             combined = combined[combined['提單號碼'] != '']
 
-            # --- 判斷「正報人」與「件數」邏輯 ---
-            stats_positive = {} 
+            # B. 自動統計正報人件數
+            stats_positive = {}
             current_sender = None
-            
             for i, row in combined.iterrows():
-                val_a = str(row['報關']).strip()
-                val_p = str(row['寄件人']).strip()
-                
-                # 遇到正式報關/合併正報，開啟新組別
+                val_a, val_p = str(row['報關']).strip(), str(row['寄件人']).strip()
                 if "正式報關" in val_a or "合併正報" in val_a:
                     current_sender = val_p if val_p != "" else "未知"
-                    if current_sender not in stats_positive:
-                        stats_positive[current_sender] = 0
-                
-                # 統計件數 (排除不報關區間)
-                if current_sender and "不報關" not in val_a:
-                    stats_positive[current_sender] += 1
-                elif "不報關" in val_a:
-                    current_sender = None
+                    if current_sender not in stats_positive: stats_positive[current_sender] = 0
+                if current_sender and "不報關" not in val_a: stats_positive[current_sender] += 1
+                elif "不報關" in val_a: current_sender = None
 
             pos_string = "、".join([f"{name} {count} 件" for name, count in stats_positive.items()])
             count_no = len(df_no_sheet)
-            total_count = len(df_cust) + len(df_no_sheet)
+            total_count = len(combined)
 
-            # C. 跨表比對
+            # C. 跨表比對收件人
             def lookup_info(row):
                 hawb = str(row['提單號碼']).strip()
                 if hawb in search_db.index:
@@ -108,45 +90,24 @@ if has_gen and has_lian:
                     if isinstance(info, pd.DataFrame): info = info.iloc[0]
                     return pd.Series([info["CONSIGNEE'S NAME"], info["CONSIGNEE'S ADDRESS"], info["PostCode"], info["CONSIGNEE'S TEL"]])
                 return pd.Series(["", "", "", ""])
-            
             combined[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = combined.apply(lookup_info, axis=1)
 
-            # D. 產出檔案
-            final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
-            
-            # 建立帶有間隔空行的資料表
-            spaced_rows = []
-            last_type = None
-            for _, row in combined.iterrows():
-                curr_type = str(row['報關']).strip()
-                if last_type is not None and curr_type != last_type and curr_type != "":
-                    spaced_rows.append(pd.Series([None] * len(final_cols), index=final_cols))
-                
-                display_row = row.copy()
-                if curr_type == "不報關" and last_type == "不報關":
-                    display_row['報關'] = ""
-                spaced_rows.append(display_row)
-                last_type = curr_type
-
-            df_final = pd.DataFrame(spaced_rows).fillna('')[final_cols]
-
+            # D. 下載檔案產出
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_final.to_excel(writer, sheet_name='出口總明細', index=False)
-                ws = writer.sheets['出口總明細']
-                for r_idx, row in enumerate(ws.iter_rows()):
-                    for cell in row:
-                        cell.font = Font(name='Arial', size=10)
-                        if r_idx == 0: cell.alignment = Alignment(horizontal='left')
-
+                final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
+                combined[final_cols].to_excel(writer, sheet_name='出口總明細', index=False)
+            
             today_str = datetime.now().strftime("%Y%m%d")
             st.balloons()
-            st.success("✅ 處理完成！已自動判斷件數。")
-            st.download_button(label="📥 下載轉換後的信天翁檔案", data=output.getvalue(), file_name=f"{today_str}_信天翁_Manifest.xlsx", use_container_width=True)
+            st.success("✅ 處理完成！")
+            st.download_button(label="📥 下載轉換後的信天翁檔案", data=output.getvalue(), file_name=f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
-            # E. Gmail 連結
-            recipient = "窗口信箱@gmail.com"
-            subject = f"{today_str} 信天翁報關資料"
+            # --- E. Gmail 固定格式設定 ---
+            recipients = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
+            cc_list = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
+            subject = f"{today_str} 信天翁 to MO (出口明細)"
+            
             email_body = (
                 f"Dears\n\n"
                 f"今日出口明細如附檔，共 {total_count} 件\n"
@@ -155,8 +116,14 @@ if has_gen and has_lian:
                 f"不報關： {count_no} 件"
             )
             
-            mailto_url = f"https://mail.google.com/mail/?view=cm&fs=1&to={recipient}&su={urllib.parse.quote(subject)}&body={urllib.parse.quote(email_body)}"
-            st.markdown(f'<a href="{mailto_url}" target="_blank" class="email-btn">📧 開啟 Gmail (自動填寫：{pos_string})</a>', unsafe_allow_html=True)
+            # 使用 urllib.parse.quote 處理特殊字元
+            mailto_url = f"https://mail.google.com/mail/?view=cm&fs=1" \
+                         f"&to={recipients}" \
+                         f"&cc={cc_list}" \
+                         f"&su={urllib.parse.quote(subject)}" \
+                         f"&body={urllib.parse.quote(email_body)}"
+            
+            st.markdown(f'<a href="{mailto_url}" target="_blank" class="email-btn">📧 開啟 Gmail (已自動填妥收件人與內容)</a>', unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"發生錯誤: {e}")
