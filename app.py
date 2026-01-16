@@ -7,7 +7,7 @@ from datetime import datetime
 # 1. 網頁基本設定
 st.set_page_config(page_title="信天翁系統", layout="centered")
 
-# 自定義 CSS：精確控制元件顏色
+# 自定義 CSS：精確控制元件顏色與背景
 st.markdown("""
     <style>
     /* 全域背景：淡灰色 */
@@ -24,31 +24,36 @@ st.markdown("""
         border: 2px dashed #333333 !important;
         border-radius: 10px;
     }
-    /* Browse Files 按鈕：改為白底黑字 */
+    
+    /* Browse Files 按鈕：強制白底黑字黑邊 */
     button[data-testid="baseButton-secondary"] {
         background-color: #FFFFFF !important;
         color: #000000 !important;
-        border: 1px solid #333333 !important;
+        border: 1px solid #000000 !important;
     }
 
-    /* 狀態框樣式自定義 */
-    /* 待上傳狀態：白底灰字 */
-    div[data-testid="stNotification"] {
-        background-color: #FFFFFF !important;
-        border: 1px solid #DDD !important;
-    }
-    div[data-testid="stNotification"] p {
-        color: #888888 !important; /* 灰字 */
-        font-weight: normal;
+    /* 狀態框樣式：移除所有底色 (透明背景) */
+    div[data-testid="stNotification"], div[data-testid="stNotificationV2"] {
+        background-color: rgba(0,0,0,0) !important; /* 透明背景 */
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0px !important;
     }
     
-    /* 上傳成功狀態：強制變回黑字 */
+    /* 待上傳狀態文字：灰字 */
+    div[data-testid="stNotification"] p {
+        color: #888888 !important;
+        font-size: 16px !important;
+    }
+    
+    /* 上傳成功狀態文字：黑字 */
     div[data-testid="stNotificationV2"]:has(svg[data-testid="stNotificationIconSuccess"]) p {
         color: #000000 !important;
-        font-weight: bold;
+        font-weight: bold !important;
+        font-size: 16px !important;
     }
 
-    /* 產出/下載按鈕：白底黑字 */
+    /* 產出按鈕：白底黑字黑邊 */
     div.stButton > button:first-child {
         background-color: #FFFFFF !important;
         color: #000000 !important;
@@ -56,13 +61,14 @@ st.markdown("""
         height: 50px;
         font-size: 18px;
         font-weight: bold;
+        width: 100%;
     }
     div.stButton > button:hover {
-        background-color: #EEEEEE !important;
-        color: #000000 !important;
+        background-color: #F0F0F0 !important;
+        border: 2px solid #000000 !important;
     }
 
-    /* 強制所有 Markdown 文字為黑色 */
+    /* 強制所有文字顏色 */
     .stMarkdown p, .stMarkdown span { color: #000000 !important; }
     </style>
     """, unsafe_allow_html=True)
