@@ -7,17 +7,17 @@ from datetime import datetime
 # 1. 網頁基本設定
 st.set_page_config(page_title="信天翁系統", layout="centered")
 
-# 自定義 CSS：精確控制元件顏色與背景
+# 自定義 CSS：移除底色、修正白底白字、強化按鈕
 st.markdown("""
     <style>
     /* 全域背景：淡灰色 */
     .stApp { background-color: #F5F5F5; }
     
-    /* 標題：黑色 */
+    /* 標題與標題文字：黑色 */
     .big-title { font-size: 36px !important; font-weight: bold; color: #000000 !important; }
     .sub-title { font-size: 16px; color: #333333 !important; margin-bottom: 25px; }
 
-    /* 上傳框內部：白底黑字 */
+    /* 上傳框內部：純白背景 */
     .stFileUploader section {
         background-color: #FFFFFF !important;
         padding: 40px !important;
@@ -25,16 +25,20 @@ st.markdown("""
         border-radius: 10px;
     }
     
-    /* Browse Files 按鈕：強制白底黑字黑邊 */
+    /* 修正「Browse Files」按鈕：白底、黑字、黑框 */
     button[data-testid="baseButton-secondary"] {
         background-color: #FFFFFF !important;
         color: #000000 !important;
         border: 1px solid #000000 !important;
     }
+    button[data-testid="baseButton-secondary"] p {
+        color: #000000 !important;
+    }
 
-    /* 狀態框樣式：移除所有底色 (透明背景) */
+    /* 狀態框樣式：徹底透明背景，無陰影，無邊框 */
     div[data-testid="stNotification"], div[data-testid="stNotificationV2"] {
-        background-color: rgba(0,0,0,0) !important; /* 透明背景 */
+        background-color: transparent !important;
+        background: none !important;
         border: none !important;
         box-shadow: none !important;
         padding: 0px !important;
@@ -53,8 +57,8 @@ st.markdown("""
         font-size: 16px !important;
     }
 
-    /* 產出按鈕：白底黑字黑邊 */
-    div.stButton > button:first-child {
+    /* 「信天翁文件產出」與「下載」按鈕：白底、黑字、黑邊 */
+    div.stButton > button {
         background-color: #FFFFFF !important;
         color: #000000 !important;
         border: 2px solid #000000 !important;
@@ -63,13 +67,17 @@ st.markdown("""
         font-weight: bold;
         width: 100%;
     }
+    /* 按鈕內的文字也要強制黑色 */
+    div.stButton > button p {
+        color: #000000 !important;
+    }
     div.stButton > button:hover {
-        background-color: #F0F0F0 !important;
+        background-color: #EEEEEE !important;
         border: 2px solid #000000 !important;
     }
 
-    /* 強制所有文字顏色 */
-    .stMarkdown p, .stMarkdown span { color: #000000 !important; }
+    /* 強制所有顯示文字為黑色 */
+    .stMarkdown p, .stMarkdown span, label { color: #000000 !important; }
     </style>
     """, unsafe_allow_html=True)
 
