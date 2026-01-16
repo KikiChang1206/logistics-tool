@@ -7,21 +7,21 @@ from datetime import datetime
 # 1. 網頁基本設定
 st.set_page_config(page_title="信天翁系統", layout="centered")
 
-# 自定義 CSS：移除底色、修正白底白字、強化按鈕
+# 自定義 CSS：換成黑底風格，並修復按鈕顏色
 st.markdown("""
     <style>
-    /* 全域背景：淡灰色 */
-    .stApp { background-color: #F5F5F5; }
+    /* 全域背景：深黑色 */
+    .stApp { background-color: #0E1117; }
     
-    /* 標題與標題文字：黑色 */
-    .big-title { font-size: 36px !important; font-weight: bold; color: #000000 !important; }
-    .sub-title { font-size: 16px; color: #333333 !important; margin-bottom: 25px; }
+    /* 標題與標題文字：白色 */
+    .big-title { font-size: 36px !important; font-weight: bold; color: #FFFFFF !important; }
+    .sub-title { font-size: 16px; color: #CCCCCC !important; margin-bottom: 25px; }
 
     /* 上傳框內部：純白背景 */
     .stFileUploader section {
         background-color: #FFFFFF !important;
         padding: 40px !important;
-        border: 2px dashed #333333 !important;
+        border: 2px dashed #FFFFFF !important;
         border-radius: 10px;
     }
     
@@ -35,7 +35,7 @@ st.markdown("""
         color: #000000 !important;
     }
 
-    /* 狀態框樣式：徹底透明背景，無陰影，無邊框 */
+    /* 狀態框樣式：徹底透明背景，文字改為白色 */
     div[data-testid="stNotification"], div[data-testid="stNotificationV2"] {
         background-color: transparent !important;
         background: none !important;
@@ -44,16 +44,10 @@ st.markdown("""
         padding: 0px !important;
     }
     
-    /* 待上傳狀態文字：灰字 */
-    div[data-testid="stNotification"] p {
-        color: #888888 !important;
-        font-size: 16px !important;
-    }
-    
-    /* 上傳成功狀態文字：黑字 */
-    div[data-testid="stNotificationV2"]:has(svg[data-testid="stNotificationIconSuccess"]) p {
-        color: #000000 !important;
-        font-weight: bold !important;
+    /* 狀態文字：白色 (配合黑底) */
+    div[data-testid="stNotification"] p, 
+    div[data-testid="stNotificationV2"] p {
+        color: #FFFFFF !important;
         font-size: 16px !important;
     }
 
@@ -67,22 +61,24 @@ st.markdown("""
         font-weight: bold;
         width: 100%;
     }
-    /* 按鈕內的文字也要強制黑色 */
+    /* 按鈕內的文字強制黑色 */
     div.stButton > button p {
         color: #000000 !important;
     }
     div.stButton > button:hover {
         background-color: #EEEEEE !important;
-        border: 2px solid #000000 !important;
     }
 
-    /* 強制所有顯示文字為黑色 */
-    .stMarkdown p, .stMarkdown span, label { color: #000000 !important; }
+    /* 檔案確認標題：白色 */
+    h3 { color: #FFFFFF !important; }
+
+    /* 強制所有 Markdown 文字為白色 */
+    .stMarkdown p, .stMarkdown span, label { color: #FFFFFF !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.markdown('<p class="big-title">🐦 信天翁 自動轉換器</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">請將「一般」與「聯郵」檔案拖入上方大框框中</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">請將「一般」與「聯郵」檔案拖入上方白色區域中</p>', unsafe_allow_html=True)
 
 # 2. 檔案上傳區
 uploaded_files = st.file_uploader("請上傳文件", accept_multiple_files=True)
@@ -194,4 +190,4 @@ if has_general and has_lian_yu:
         except Exception as e:
             st.error(f"發生錯誤: {e}")
 else:
-    st.info("💡 提示：請將含有『一般』與『聯郵』字樣的兩個檔案一起拖入上方框框中。")
+    st.info("💡 提示：請將含有『一般』與『聯郵』字樣的兩個檔案一起拖入白色框框中。")
