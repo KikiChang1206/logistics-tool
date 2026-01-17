@@ -55,7 +55,7 @@ if has_gen and has_lian:
     if st.button("🚀 信天翁文件產出", use_container_width=True) or st.session_state.processed:
         try:
             with st.spinner('分析中...'):
-                # 取得當前日期 (20260118)
+                # 取得當前正確日期 (20260118)
                 t_str = datetime.now().strftime("%Y%m%d")
 
                 # A. 讀取資料
@@ -63,35 +63,46 @@ if has_gen and has_lian:
                 df_g.columns = ["NO.", "HAWB / CN", "Marking", "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "COD", "CONSIGNEE'S TEL", "PCS", "WT (KG)", "DESCRIPTION", "VALUE (USD)", "BAG NO.", "SHORT NAME"][:len(df_g.columns)]
                 db = df_g.set_index('HAWB / CN')
 
-                df_c = pd.read_excel(lian_f, sheet_name='報關明細', dtype=str).fillna('')
+                df_c = pd.read_excel(lian_f, sheet_name='報關明細', dtype=str)
                 df_n = pd.read_excel(lian_f, sheet_name='不報關-X7明細', dtype=str).fillna('')
-                
-                # B. 統計邏輯 (在合併與插入空行前統計，避免算錯)
-                def count_by_category(df, keywords):
-                    counts = {}
-                    current_s = None
-                    # 只處理提單號碼不為空的有效行
-                    valid_df = df[df['提單號碼'].str.strip() != ''].copy()
-                    for _, r in valid_df.iterrows():
-                        a, p = str(r['報關']).strip(), str(r['寄件人']).strip()
-                        if any(k in a for k in keywords):
-                            current_s = p if p != "" else "未知"
-                            counts[current_s] = counts.get(current_s, 0) + 1
-                    return counts
 
-                # 正報關鍵字：正式報關、合併正報
-                stats_pos = count_by_category(df_c, ["正式報關", "合併正報"])
-                # 簡報關鍵字：簡易報關、合併簡報
-                stats_sim = count_by_category(df_c, ["簡易報關", "合併簡報"])
+                # B. 修正後的統計邏輯 (解決寄件人欄位空白問題)
+                def get_stats(df, pos_keywords, sim_keywords):
+                    # 預處理：將空白字串轉為 NaN，然後向下填充寄件人與報關類型
+                    temp_df = df.copy()
+                    temp_df['報關'] = temp_df['報關'].replace(r'^\s*$', pd.NA, regex=True).ffill()
+                    temp_df['寄件人'] = temp_df['寄件人'].replace(r'^\s*$', pd.NA, regex=True).ffill()
+                    
+                    pos_counts = {}
+                    sim_counts = {}
+                    
+                    # 只計算有提單號碼的行
+                    temp_df = temp_df[temp_df['提單號碼'].astype(str).str.strip() != '']
+                    
+                    for _, r in temp_df.iterrows():
+                        a = str(r['報關'])
+                        p = str(r['寄件人']).strip()
+                        # 簡短名稱處理：若名稱太長只取前四碼，或保留原樣
+                        short_p = p[:4] if "有限公司" in p else p
+                        
+                        if any(k in a for k in pos_keywords):
+                            pos_counts[short_p] = pos_counts.get(short_p, 0) + 1
+                        elif any(k in a for k in sim_keywords):
+                            sim_counts[short_p] = sim_counts.get(short_p, 0) + 1
+                            
+                    return pos_counts, sim_counts
+
+                stats_pos, stats_sim = get_stats(df_c, ["正式報關", "合併正報"], ["簡易報關", "合併簡報"])
                 
                 pos_text = "、".join([f"{n} {c}件" for n, c in stats_pos.items()]) if stats_pos else "無"
                 sim_text = "、".join([f"{n} {c}件" for n, c in stats_sim.items()]) if stats_sim else "無"
                 
                 # C. 合併與比對
-                df_n['報關'] = "不報關"
-                comb = pd.concat([df_c, df_n], ignore_index=True)
-                comb['提單號碼'] = comb['提單號碼'].str.strip()
-                comb = comb[comb['提單號碼'] != '']
+                df_c_filled = df_c.fillna('')
+                df_n_filled = df_n.fillna('')
+                df_n_filled['報關'] = "不報關"
+                comb = pd.concat([df_c_filled, df_n_filled], ignore_index=True)
+                comb = comb[comb['提單號碼'].astype(str).str.strip() != '']
 
                 def lookup(r):
                     h = str(r['提單號碼']).strip()
@@ -118,7 +129,7 @@ if has_gen and has_lian:
 
                 df_final = pd.DataFrame(spaced_rows).fillna('')[final_cols]
 
-                # E. 產出 Excel (移除所有框線)
+                # E. 產出 Excel (移除框線)
                 no_border = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='openpyxl') as writer:
@@ -134,22 +145,22 @@ if has_gen and has_lian:
                     st.balloons()
                     st.session_state.processed = True
                 
-                st.success(f"✅ 處理完成！日期：{t_str}")
+                st.success(f"✅ 處理完成！今日日期：{t_str}")
                 st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{t_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
-                # F. Gmail 範本 (自動統計)
+                # F. Gmail 範本
                 to = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
                 cc = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
                 sub = f"{t_str} 信天翁 to MO (出口明細)"
-                total_valid = len(df_c[df_c['提單號碼'].str.strip() != '']) + len(df_n[df_n['提單號碼'].str.strip() != ''])
+                total_count = len(comb)
                 
-                body = (f"Dears\n\n今日出口明細如附檔，共 {total_count if 'total_count' in locals() else total_valid} 件\n"
+                body = (f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n"
                         f"請再協助申報，並安排出口，謝謝\n\n"
                         f"正報：{pos_text}\n"
                         f"簡報：{sim_text}\n"
-                        f"不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件")
+                        f"不報關：{len(df_n_filled[df_n_filled['提單號碼'].astype(str).str.strip() != ''])} 件")
                 
                 url = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
-                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail (自動填妥日期與件數)</a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail (自動填妥日期與正確件數)</a>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"發生錯誤: {e}")
