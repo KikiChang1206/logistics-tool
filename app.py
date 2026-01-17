@@ -38,7 +38,7 @@ if has_gen and has_lian:
 
     if st.button("🚀 信天翁文件產出", use_container_width=True) or st.session_state.processed:
         try:
-            with st.spinner('正在精確統計件數...'):
+            with st.spinner('正在產出文件...'):
                 # 取得台灣時間 (UTC+8)
                 tw_now = datetime.utcnow() + timedelta(hours=8)
                 today_str = tw_now.strftime("%Y%m%d")
@@ -48,25 +48,23 @@ if has_gen and has_lian:
                 df_gen.columns = ["NO.", "HAWB / CN", "Marking", "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "COD", "CONSIGNEE'S TEL", "PCS", "WT (KG)", "DESCRIPTION", "VALUE (USD)", "BAG NO.", "SHORT NAME"][:len(df_gen.columns)]
                 search_db = df_gen.set_index('HAWB / CN')
 
-                # B. 讀取聯郵檔案 (原始處理，不使用 ffill)
+                # B. 讀取聯郵檔案
                 df_c = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
-                # C. 【精確邏輯修正】：到空格前停止統計
+                # C. 精確統計邏輯
                 def get_stats_v2(df, pos_keys, sim_keys):
                     pos_counts, sim_counts = {}, {}
                     i = 0
                     max_len = len(df)
                     while i < max_len:
                         val_a = str(df.iloc[i]['報關']).strip()
-                        # 檢查是否為 正報 或 簡報 的起始點
                         is_pos = any(k in val_a for k in pos_keys)
                         is_sim = any(k in val_a for k in sim_keys)
                         
                         if is_pos or is_sim:
-                            # 鎖定當前這一組的寄件人名稱 (P欄)
                             sender = str(df.iloc[i]['寄件人']).strip()
-                            if sender == "": # 如果第一行沒寫名字，往下找第一個有名字的
+                            if sender == "":
                                 for j in range(i, max_len):
                                     if str(df.iloc[j]['寄件人']).strip() != "":
                                         sender = str(df.iloc[j]['寄件人']).strip()
@@ -74,15 +72,11 @@ if has_gen and has_lian:
                             
                             short_sender = sender.replace("有限公司","").replace("股份有限公司","").replace("生醫國際","")
                             count = 0
-                            
-                            # 從當前行往下數，直到遇到第一個「提單號碼為空」的行(空格)為止
                             while i < max_len:
-                                if str(df.iloc[i]['提單號碼']).strip() == "": # 遇到空格停止
+                                if str(df.iloc[i]['提單號碼']).strip() == "":
                                     break
                                 count += 1
                                 i += 1
-                            
-                            # 存入統計
                             if is_pos: pos_counts[short_sender] = pos_counts.get(short_sender, 0) + count
                             if is_sim: sim_counts[short_sender] = sim_counts.get(short_sender, 0) + count
                         else:
@@ -93,7 +87,7 @@ if has_gen and has_lian:
                 pos_text = "、".join([f"{n} {c}件" for n, c in stats_pos.items()]) if stats_pos else "無"
                 sim_text = "、".join([f"{n} {c}件" for n, c in stats_sim.items()]) if stats_sim else "無"
 
-                # D. 產出原始正確格式之 Excel
+                # D. 產出 Excel
                 df_n['報關'] = "不報關"
                 combined = pd.concat([df_c, df_n], ignore_index=True)
                 combined = combined[combined['提單號碼'].str.strip() != '']
@@ -107,7 +101,6 @@ if has_gen and has_lian:
                     return pd.Series([""]*4)
                 combined[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = combined.apply(lookup, axis=1)
 
-                # 插入分組空行邏輯 (原始格式)
                 final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
                 spaced_rows, last_type = [], None
                 for _, row in combined.iterrows():
@@ -134,13 +127,15 @@ if has_gen and has_lian:
                 st.success(f"✅ 處理完成！日期：{today_str}")
                 st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
-                # E. Gmail 範本 (修正件數)
+                # E. Gmail 範本 (修正按鈕文字)
                 to = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
                 cc = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
                 sub = f"{today_str} 信天翁 to MO (出口明細)"
                 total_count = len(combined)
                 body = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
                 url = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
-                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail (大研 {len(stats_sim.get("大研", [0])) if isinstance(stats_sim.get("大研"), list) else stats_sim.get("大研", 0)}件)</a>', unsafe_allow_html=True)
+                
+                # 下方按鈕文字已更改為 "📧 開啟 Gmail"
+                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail</a>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"錯誤: {e}")
