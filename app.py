@@ -55,46 +55,44 @@ if has_gen and has_lian:
     if st.button("🚀 信天翁文件產出", use_container_width=True) or st.session_state.processed:
         try:
             with st.spinner('分析中...'):
+                # 取得當前日期 (20260118)
+                t_str = datetime.now().strftime("%Y%m%d")
+
+                # A. 讀取資料
                 df_g = pd.read_excel(gen_f, dtype=str).fillna('')
                 df_g.columns = ["NO.", "HAWB / CN", "Marking", "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "COD", "CONSIGNEE'S TEL", "PCS", "WT (KG)", "DESCRIPTION", "VALUE (USD)", "BAG NO.", "SHORT NAME"][:len(df_g.columns)]
                 db = df_g.set_index('HAWB / CN')
 
                 df_c = pd.read_excel(lian_f, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_f, sheet_name='不報關-X7明細', dtype=str).fillna('')
-                df_n['報關'] = "不報關"
-                comb = pd.concat([df_c, df_n], ignore_index=True)
+                
+                # B. 統計邏輯 (在合併與插入空行前統計，避免算錯)
+                def count_by_category(df, keywords):
+                    counts = {}
+                    current_s = None
+                    # 只處理提單號碼不為空的有效行
+                    valid_df = df[df['提單號碼'].str.strip() != ''].copy()
+                    for _, r in valid_df.iterrows():
+                        a, p = str(r['報關']).strip(), str(r['寄件人']).strip()
+                        if any(k in a for k in keywords):
+                            current_s = p if p != "" else "未知"
+                            counts[current_s] = counts.get(current_s, 0) + 1
+                    return counts
 
-                # C. 統計邏輯 (區分 正報 與 簡報)
-                stats_pos = {}  # 正報
-                stats_sim = {}  # 簡報
-                curr_s = None
-                curr_cat = None # 記錄當前類別 (pos or sim)
-
-                for _, r in comb.iterrows():
-                    a, p = str(r['報關']).strip(), str(r['寄件人']).strip()
-                    # 判定正報
-                    if "正式報關" in a or "合併正報" in a:
-                        curr_s = p if p != "" else "未知"
-                        curr_cat = "pos"
-                        if curr_s not in stats_pos: stats_pos[curr_s] = 0
-                    # 判定簡報
-                    elif "簡易報關" in a or "合併簡報" in a:
-                        curr_s = p if p != "" else "未知"
-                        curr_cat = "sim"
-                        if curr_s not in stats_sim: stats_sim[curr_s] = 0
-                    
-                    # 累計件數
-                    if curr_s and "不報關" not in a:
-                        if curr_cat == "pos": stats_pos[curr_s] += 1
-                        elif curr_cat == "sim": stats_sim[curr_s] += 1
-                    elif "不報關" in a:
-                        curr_s = None
-                        curr_cat = None
-
+                # 正報關鍵字：正式報關、合併正報
+                stats_pos = count_by_category(df_c, ["正式報關", "合併正報"])
+                # 簡報關鍵字：簡易報關、合併簡報
+                stats_sim = count_by_category(df_c, ["簡易報關", "合併簡報"])
+                
                 pos_text = "、".join([f"{n} {c}件" for n, c in stats_pos.items()]) if stats_pos else "無"
                 sim_text = "、".join([f"{n} {c}件" for n, c in stats_sim.items()]) if stats_sim else "無"
                 
-                # D. 跨表比對
+                # C. 合併與比對
+                df_n['報關'] = "不報關"
+                comb = pd.concat([df_c, df_n], ignore_index=True)
+                comb['提單號碼'] = comb['提單號碼'].str.strip()
+                comb = comb[comb['提單號碼'] != '']
+
                 def lookup(r):
                     h = str(r['提單號碼']).strip()
                     if h in db.index:
@@ -102,9 +100,10 @@ if has_gen and has_lian:
                         if isinstance(i, pd.DataFrame): i = i.iloc[0]
                         return pd.Series([i["CONSIGNEE'S NAME"], i["CONSIGNEE'S ADDRESS"], i["PostCode"], i["CONSIGNEE'S TEL"]])
                     return pd.Series([""]*4)
+                
                 comb[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = comb.apply(lookup, axis=1)
 
-                # E. 插入分組空行
+                # D. 插入分組空行
                 final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
                 spaced_rows = []
                 last_type = None
@@ -119,7 +118,7 @@ if has_gen and has_lian:
 
                 df_final = pd.DataFrame(spaced_rows).fillna('')[final_cols]
 
-                # F. 產出 Excel (強制刪除所有框線)
+                # E. 產出 Excel (移除所有框線)
                 no_border = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='openpyxl') as writer:
@@ -128,23 +127,29 @@ if has_gen and has_lian:
                     for row in ws.iter_rows():
                         for cell in row:
                             cell.font = Font(name='Arial', size=10)
-                            cell.border = no_border # 移除框線
+                            cell.border = no_border
                             cell.alignment = Alignment(horizontal='left')
 
-                t = datetime.now().strftime("%Y%m%d")
                 if not st.session_state.processed:
                     st.balloons()
                     st.session_state.processed = True
                 
-                st.success("✅ 處理完成！")
-                st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{t}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
+                st.success(f"✅ 處理完成！日期：{t_str}")
+                st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{t_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
-                # G. Gmail 範本 (含簡報統計)
+                # F. Gmail 範本 (自動統計)
                 to = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
                 cc = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
-                sub = f"{t} 信天翁 to MO (出口明細)"
-                body = f"Dears\n\n今日出口明細如附檔，共 {len(comb)} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n)} 件"
+                sub = f"{t_str} 信天翁 to MO (出口明細)"
+                total_valid = len(df_c[df_c['提單號碼'].str.strip() != '']) + len(df_n[df_n['提單號碼'].str.strip() != ''])
+                
+                body = (f"Dears\n\n今日出口明細如附檔，共 {total_count if 'total_count' in locals() else total_valid} 件\n"
+                        f"請再協助申報，並安排出口，謝謝\n\n"
+                        f"正報：{pos_text}\n"
+                        f"簡報：{sim_text}\n"
+                        f"不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件")
+                
                 url = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
-                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail (自動填妥收件人與內容)</a>', unsafe_allow_html=True)
+                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail (自動填妥日期與件數)</a>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"發生錯誤: {e}")
