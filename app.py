@@ -15,8 +15,8 @@ st.markdown("""
     .stFileUploader section { background-color: #FFFFFF !important; padding: 40px !important; border: 2px dashed #FFFFFF !important; border-radius: 10px; }
     div.stButton > button { background-color: #FFFFFF !important; color: #000000 !important; border: 2px solid #000000 !important; height: 50px; font-weight: bold; width: 100%; }
     .email-btn { display: inline-block; width: 100%; text-align: center; background-color: #FFFFFF; color: #000000 !important; border: 2px solid #28A745; padding: 12px; font-weight: bold; text-decoration: none; border-radius: 5px; margin-top: 10px; }
-    .email-btn-sub { display: inline-block; width: 100%; text-align: center; background-color: #E8F5E9; color: #2E7D32 !important; border: 1px solid #2E7D32; padding: 8px; font-weight: normal; text-decoration: none; border-radius: 5px; margin-top: 5px; font-size: 14px; }
-    h3 { color: #FFFFFF !important; }
+    .email-btn-sub { display: inline-block; width: 100%; text-align: center; background-color: #E3F2FD; color: #1565C0 !important; border: 1px solid #1565C0; padding: 8px; font-weight: bold; text-decoration: none; border-radius: 5px; margin-top: 5px; font-size: 14px; }
+    h3, h4 { color: #FFFFFF !important; }
     .stMarkdown p, .stMarkdown span, label { color: #FFFFFF !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -53,16 +53,14 @@ if has_gen and has_lian:
                 df_c = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
-                # C. 精確統計邏輯 (回傳清單以利產出個別草稿)
+                # C. 統計邏輯
                 def get_stats_v2(df, pos_keys, sim_keys):
                     pos_counts, sim_counts = {}, {}
-                    i = 0
-                    max_len = len(df)
+                    i, max_len = 0, len(df)
                     while i < max_len:
                         val_a = str(df.iloc[i]['報關']).strip()
                         is_pos = any(k in val_a for k in pos_keys)
                         is_sim = any(k in val_a for k in sim_keys)
-                        
                         if is_pos or is_sim:
                             sender = str(df.iloc[i]['寄件人']).strip()
                             if sender == "":
@@ -70,18 +68,14 @@ if has_gen and has_lian:
                                     if str(df.iloc[j]['寄件人']).strip() != "":
                                         sender = str(df.iloc[j]['寄件人']).strip()
                                         break
-                            
                             short_sender = sender.replace("有限公司","").replace("股份有限公司","").replace("生醫國際","")
                             count = 0
                             while i < max_len:
-                                if str(df.iloc[i]['提單號碼']).strip() == "":
-                                    break
-                                count += 1
-                                i += 1
+                                if str(df.iloc[i]['提單號碼']).strip() == "": break
+                                count += 1; i += 1
                             if is_pos: pos_counts[short_sender] = pos_counts.get(short_sender, 0) + count
                             if is_sim: sim_counts[short_sender] = sim_counts.get(short_sender, 0) + count
-                        else:
-                            i += 1
+                        else: i += 1
                     return pos_counts, sim_counts
 
                 stats_pos, stats_sim = get_stats_v2(df_c, ["正式報關", "合併正報"], ["簡易報關", "合併簡報"])
@@ -102,54 +96,39 @@ if has_gen and has_lian:
                     return pd.Series([""]*4)
                 combined[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = combined.apply(lookup, axis=1)
 
-                final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
-                spaced_rows, last_type = [], None
-                for _, row in combined.iterrows():
-                    curr = str(row['報關']).strip()
-                    if last_type is not None and curr != last_type and curr != "":
-                        spaced_rows.append(pd.Series([None] * len(final_cols), index=final_cols))
-                    disp = row.copy()
-                    if curr == "不報關" and last_type == "不報關": disp['報關'] = ""
-                    spaced_rows.append(disp)
-                    last_type = curr
-                df_final = pd.DataFrame(spaced_rows).fillna('')[final_cols]
-
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='openpyxl') as writer:
-                    df_final.to_excel(writer, sheet_name='出口總明細', index=False)
-                    ws = writer.sheets['出口總明細']
-                    for r_idx, row in enumerate(ws.iter_rows()):
-                        for cell in row:
-                            cell.font = Font(name='Arial', size=10)
-                            if r_idx == 0: cell.alignment = Alignment(horizontal='left')
+                    combined.to_excel(writer, sheet_name='出口總明細', index=False)
 
                 st.session_state.processed = True
                 st.success(f"✅ 處理完成！日期：{today_str}")
-                st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
+                st.download_button("📥 下載信天翁 TO MO 檔案", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
-                # E. Gmail 範本產出
+                # --- E. Gmail 範本產出區 ---
                 st.write("---")
-                st.write("### 📧 郵件草稿快速產生")
+                st.write("### 📧 Gmail 草稿清單")
                 
-                # 1. 總出口明細草稿
-                to = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
-                cc = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
+                # 1. 總出口明細草稿 (收件人全開)
+                to_all = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
+                cc_all = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
                 sub_main = f"{today_str} 信天翁 to MO (出口明細)"
                 total_count = len(combined[combined['提單號碼'].str.strip() != ''])
-                body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
-                url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
-                st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 開啟 Gmail (總出口明細)</a>', unsafe_allow_html=True)
+                body_main = f"Dears\n\今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
+                url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_all}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
+                st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 1. 總出口明細草稿</a>', unsafe_allow_html=True)
 
-                # 2. 個別報關文件草稿 (針對有報關的廠商)
-                # 合併正報與簡報的廠商名單
-                report_brands = set(stats_pos.keys()) | set(stats_sim.keys())
+                # 2. 個別報關文件草稿 (針對有正報或簡報的廠商)
+                report_brands = sorted(set(stats_pos.keys()) | set(stats_sim.keys()))
                 
                 if report_brands:
-                    st.write("#### 個別報關文件草稿：")
-                    for brand in sorted(report_brands):
+                    st.write("#### 報關文件草稿：")
+                    # 個別草稿的副本僅限 gmop
+                    cc_sub = "gmop@goodmaji.com"
+                    
+                    for idx, brand in enumerate(report_brands, 2):
                         sub_brand = f"{today_str} 信天翁 to MO ( {brand} 文件)"
                         body_brand = f"Dears,\n\n{brand}報關文件如附檔，請您協助申報，感恩"
-                        url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
-                        st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 報關草稿：{brand}</a>', unsafe_allow_html=True)
+                        url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_sub}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
+                        st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 {idx}. 報關草稿：{brand}</a>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"錯誤: {e}")
