@@ -15,6 +15,7 @@ st.markdown("""
     .stFileUploader section { background-color: #FFFFFF !important; padding: 40px !important; border: 2px dashed #FFFFFF !important; border-radius: 10px; }
     div.stButton > button { background-color: #FFFFFF !important; color: #000000 !important; border: 2px solid #000000 !important; height: 50px; font-weight: bold; width: 100%; }
     .email-btn { display: inline-block; width: 100%; text-align: center; background-color: #FFFFFF; color: #000000 !important; border: 2px solid #28A745; padding: 12px; font-weight: bold; text-decoration: none; border-radius: 5px; margin-top: 10px; }
+    .email-btn-sub { display: inline-block; width: 100%; text-align: center; background-color: #E8F5E9; color: #2E7D32 !important; border: 1px solid #2E7D32; padding: 8px; font-weight: normal; text-decoration: none; border-radius: 5px; margin-top: 5px; font-size: 14px; }
     h3 { color: #FFFFFF !important; }
     .stMarkdown p, .stMarkdown span, label { color: #FFFFFF !important; }
     </style>
@@ -29,8 +30,9 @@ has_gen = has_lian = False
 gen_file = lian_file = None
 if uploaded_files:
     for f in uploaded_files:
-        if "一般" in f.name: has_gen, gen_file = True, f
-        elif "聯郵" in f.name: has_lian, lian_file = True, f
+        fname = f.name.lower()
+        if "一般" in fname: has_gen, gen_file = True, f
+        elif "聯郵" in fname: has_lian, lian_file = True, f
 
 # 3. 處理邏輯
 if has_gen and has_lian:
@@ -39,7 +41,6 @@ if has_gen and has_lian:
     if st.button("🚀 信天翁文件產出", use_container_width=True) or st.session_state.processed:
         try:
             with st.spinner('正在產出文件...'):
-                # 取得台灣時間 (UTC+8)
                 tw_now = datetime.utcnow() + timedelta(hours=8)
                 today_str = tw_now.strftime("%Y%m%d")
 
@@ -52,7 +53,7 @@ if has_gen and has_lian:
                 df_c = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
-                # C. 精確統計邏輯
+                # C. 精確統計邏輯 (回傳清單以利產出個別草稿)
                 def get_stats_v2(df, pos_keys, sim_keys):
                     pos_counts, sim_counts = {}, {}
                     i = 0
@@ -120,22 +121,35 @@ if has_gen and has_lian:
                     for r_idx, row in enumerate(ws.iter_rows()):
                         for cell in row:
                             cell.font = Font(name='Arial', size=10)
-                            cell.border = Border(left=Side(style=None), right=Side(style=None), top=Side(style=None), bottom=Side(style=None))
                             if r_idx == 0: cell.alignment = Alignment(horizontal='left')
 
                 st.session_state.processed = True
                 st.success(f"✅ 處理完成！日期：{today_str}")
                 st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
-                # E. Gmail 範本 (修正按鈕文字)
+                # E. Gmail 範本產出
+                st.write("---")
+                st.write("### 📧 郵件草稿快速產生")
+                
+                # 1. 總出口明細草稿
                 to = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
                 cc = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
-                sub = f"{today_str} 信天翁 to MO (出口明細)"
-                total_count = len(combined)
-                body = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
-                url = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub)}&body={urllib.parse.quote(body)}"
+                sub_main = f"{today_str} 信天翁 to MO (出口明細)"
+                total_count = len(combined[combined['提單號碼'].str.strip() != ''])
+                body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
+                url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
+                st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 開啟 Gmail (總出口明細)</a>', unsafe_allow_html=True)
+
+                # 2. 個別報關文件草稿 (針對有報關的廠商)
+                # 合併正報與簡報的廠商名單
+                report_brands = set(stats_pos.keys()) | set(stats_sim.keys())
                 
-                # 下方按鈕文字已更改為 "📧 開啟 Gmail"
-                st.markdown(f'<a href="{url}" target="_blank" class="email-btn">📧 開啟 Gmail</a>', unsafe_allow_html=True)
+                if report_brands:
+                    st.write("#### 個別報關文件草稿：")
+                    for brand in sorted(report_brands):
+                        sub_brand = f"{today_str} 信天翁 to MO ( {brand} 文件)"
+                        body_brand = f"Dears,\n\n{brand}報關文件如附檔，請您協助申報，感恩"
+                        url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to}&cc={cc}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
+                        st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 報關草稿：{brand}</a>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"錯誤: {e}")
