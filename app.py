@@ -21,7 +21,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown('<p class="big-title">🐦 信天翁 自動轉換器</p>', unsafe_allow_html=True)
+st.markdown('<p class="big-title">🐦 信天翁 自動轉換</p>', unsafe_allow_html=True)
 
 # 2. 檔案上傳區
 uploaded_files = st.file_uploader("請上傳文件", accept_multiple_files=True)
@@ -130,7 +130,7 @@ if has_gen and has_lian:
 
                 st.session_state.processed = True
                 st.success(f"✅ 處理完成！日期：{today_str}")
-                st.download_button("📥 下載轉換後的信天翁檔案 (無框線版)", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
+                st.download_button("📥 下載檔案 ", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
                 # E. Gmail 範本產出區
                 st.write("---")
