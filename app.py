@@ -40,7 +40,6 @@ if has_gen and has_lian:
     if st.button("🚀 信天翁文件產出", use_container_width=True) or st.session_state.processed:
         try:
             with st.spinner('正在產出文件...'):
-                # 取得台灣時間 (UTC+8)
                 tw_now = datetime.utcnow() + timedelta(hours=8)
                 today_str = tw_now.strftime("%Y%m%d")
 
@@ -53,11 +52,10 @@ if has_gen and has_lian:
                 df_c = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
-                # C. 精確統計邏輯 (整合首筆提單抓取)
+                # C. 統計與首筆提單號碼抓取邏輯
                 def get_stats_v2(df, pos_keys, sim_keys):
-                    pos_counts, sim_counts = {}, {}
-                    i = 0
-                    max_len = len(df)
+                    pos_info, sim_info = {}, {}
+                    i, max_len = 0, len(df)
                     while i < max_len:
                         val_a = str(df.iloc[i]['報關']).strip()
                         is_pos = any(k in val_a for k in pos_keys)
@@ -70,33 +68,26 @@ if has_gen and has_lian:
                                     if str(df.iloc[j]['寄件人']).strip() != "":
                                         sender = str(df.iloc[j]['寄件人']).strip()
                                         break
-                            
                             short_sender = sender.replace("有限公司","").replace("股份有限公司","").replace("生醫國際","")
                             
-                            # 抓取該廠商區塊的第一筆提單號碼供 Gmail 使用
+                            # 關鍵：抓取該區塊的第一筆提單號碼
                             first_hawb = str(df.iloc[i]['提單號碼']).strip()
                             
                             count = 0
                             while i < max_len:
-                                if str(df.iloc[i]['提單號碼']).strip() == "":
-                                    break
-                                count += 1
-                                i += 1
+                                if str(df.iloc[i]['提單號碼']).strip() == "": break
+                                count += 1; i += 1
                             
-                            # 儲存統計數據與首筆提單
-                            target_dict = pos_counts if is_pos else sim_counts
+                            target_dict = pos_info if is_pos else sim_info
                             if short_sender not in target_dict:
                                 target_dict[short_sender] = {"count": 0, "first_hawb": first_hawb}
                             target_dict[short_sender]["count"] += count
-                        else:
-                            i += 1
-                    return pos_counts, sim_counts
+                        else: i += 1
+                    return pos_info, sim_info
 
-                stats_pos_info, stats_sim_info = get_stats_v2(df_c, ["正式報關", "合併正報"], ["簡易報關", "合併簡報"])
-                
-                # 用於總郵件的文字組合
-                pos_text = "、".join([f"{n} {d['count']}件" for n, d in stats_pos_info.items()]) if stats_pos_info else "無"
-                sim_text = "、".join([f"{n} {d['count']}件" for n, d in stats_sim_info.items()]) if stats_sim_info else "無"
+                stats_pos, stats_sim = get_stats_v2(df_c, ["正式報關", "合併正報"], ["簡易報關", "合併簡報"])
+                pos_sum_text = "、".join([f"{n} {d['count']}件" for n, d in stats_pos.items()]) if stats_pos else "無"
+                sim_sum_text = "、".join([f"{n} {d['count']}件" for n, d in stats_sim.items()]) if stats_sim else "無"
 
                 # D. 產出 Excel
                 df_n['報關'] = "不報關"
@@ -128,45 +119,43 @@ if has_gen and has_lian:
                 with pd.ExcelWriter(out, engine='openpyxl') as writer:
                     df_final.to_excel(writer, sheet_name='出口總明細', index=False)
                     ws = writer.sheets['出口總明細']
-                    # 嚴格恢復原始 app.py 的格式設定
                     for r_idx, row in enumerate(ws.iter_rows()):
                         for cell in row:
                             cell.font = Font(name='Arial', size=10)
-                            # 清除所有框線
-                            cell.border = Border(left=Side(style=None), right=Side(style='thin', color='FFFFFF'), top=Side(style=None), bottom=Side(style=None))
-                            # 第一列 (Header) 靠左對齊
+                            # --- 核心修改：徹底移除框線 ---
+                            cell.border = Border() 
+                            # ---------------------------
                             if r_idx == 0:
                                 cell.alignment = Alignment(horizontal='left')
-                            else:
-                                cell.alignment = Alignment(horizontal='general')
 
                 st.session_state.processed = True
                 st.success(f"✅ 處理完成！日期：{today_str}")
-                st.download_button("📥 下載轉換後的信天翁檔案", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
+                st.download_button("📥 下載轉換後的信天翁檔案 (無框線版)", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
                 # E. Gmail 範本產出區
                 st.write("---")
-                st.write("### 📧 Gmail 草稿快速產生")
+                st.write("### 📧 Gmail 草稿清單")
+                
+                to_all = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
+                cc_all = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
                 
                 # 1. 總出口明細草稿
-                to_main = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
-                cc_main = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
                 sub_main = f"{today_str} 信天翁 to MO (出口明細)"
                 total_count = len(combined[combined['提單號碼'].str.strip() != ''])
-                body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_text}\n簡報：{sim_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
-                url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_main}&cc={cc_main}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
-                st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 1. 開啟 Gmail (總出口明細)</a>', unsafe_allow_html=True)
+                body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_sum_text}\n簡報：{sim_sum_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
+                url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_all}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
+                st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 1. 總出口明細草稿</a>', unsafe_allow_html=True)
 
-                # 2. 個別廠商報關草稿 (正報+簡報)
-                all_brand_info = {**stats_pos_info, **stats_sim_info}
+                # 2. 個別廠商報關草稿 (含首筆單號)
+                all_brand_info = {**stats_pos, **stats_sim}
                 if all_brand_info:
-                    st.write("#### 個別報關文件草稿：")
+                    st.write("#### 報關文件草稿：")
                     cc_sub = "gmop@goodmaji.com"
-                    # 排序後依序產生
                     for idx, (brand, data) in enumerate(sorted(all_brand_info.items()), 2):
                         sub_brand = f"{today_str} 信天翁 to MO ( {brand} 文件)"
+                        # 依照需求：內文第一行放首筆單號
                         body_brand = f"Dears,\n\n{data['first_hawb']}\n{brand}報關文件如附檔，請您協助申報，感恩"
-                        url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_main}&cc={cc_sub}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
+                        url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_sub}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
                         st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 {idx}. 報關草稿：{brand}</a>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"錯誤: {e}")
