@@ -68,22 +68,24 @@ if has_gen and has_lian:
                         sender_val = str(row['寄件人']).strip()
 
                         if type_val != "":
-                            # 若這行有寫報關類型，判斷是正報還簡報
+                            # 判斷是正報還簡報
                             is_pos = any(k in type_val for k in pos_keys)
                             is_sim = any(k in type_val for k in sim_keys)
 
                             if is_pos or is_sim:
                                 current_dict = pos_info if is_pos else sim_info
-                                # 處理第一行寄件人可能空白的問題
-                                if sender_val == "":
-                                    for j in range(i, len(df)):
-                                        if str(df.iloc[j]['寄件人']).strip() != "":
-                                            sender_val = str(df.iloc[j]['寄件人']).strip()
-                                            break
+                                
+                        # 若第一行寄件人空白，往下找到同區塊的第一個寄件人
+                        if sender_val == "" and current_dict is not None:
+                            for j in range(i, len(df)):
+                                if str(df.iloc[j]['提單號碼']).strip() == "": break
+                                if str(df.iloc[j]['寄件人']).strip() != "":
+                                    sender_val = str(df.iloc[j]['寄件人']).strip()
+                                    break
 
-                        # 更新目前處理的寄件人 (過濾多餘字眼)
+                        # 更新寄件人 (過濾多餘字眼)
                         if sender_val != "":
-                            current_sender = sender_val.replace("股份有限公司","").replace("有限公司","").replace("生醫國際","").replace("開發股份","").replace("國際","").strip()
+                            current_sender = sender_val.replace("股份有限公司","").replace("有限公司","").replace("生醫國際","").replace("國際開發股份","").replace("開發股份","").replace("國際","").strip()
 
                         # 累加件數與紀錄首筆單號
                         if current_dict is not None and current_sender is not None:
@@ -115,13 +117,23 @@ if has_gen and has_lian:
                 
                 spaced_rows = []
                 last_type = None
+                last_sender = None
 
-                # 全新斷行邏輯：只要報關類型有出現字，就強制斷行 (除非是連續的不報關)
+                # 全新斷行邏輯：寄件人改變，或是報關類型改變，就強制斷行
                 for _, row in combined.iterrows():
                     curr_type = str(row['報關']).strip()
+                    curr_sender = str(row['寄件人']).strip()
+                    if curr_sender == "" and last_sender is not None:
+                        curr_sender = last_sender # 繼承同區塊寄件人
 
                     if len(spaced_rows) > 0:
-                        if curr_type != "":
+                        is_new_group = False
+                        if curr_type != "" and last_type is not None and curr_type != last_type:
+                            is_new_group = True
+                        if curr_sender != "" and last_sender is not None and curr_sender != last_sender:
+                            is_new_group = True
+
+                        if is_new_group:
                             if curr_type == "不報關" and last_type == "不報關":
                                 pass # 連續的不報關不強制斷行
                             else:
@@ -133,8 +145,8 @@ if has_gen and has_lian:
                     
                     spaced_rows.append(disp)
                     
-                    if curr_type != "":
-                        last_type = curr_type
+                    if curr_type != "": last_type = curr_type
+                    if curr_sender != "": last_sender = curr_sender
 
                 df_final = pd.DataFrame(spaced_rows).fillna('')[final_cols]
 
@@ -145,13 +157,13 @@ if has_gen and has_lian:
                     for r_idx, row in enumerate(ws.iter_rows()):
                         for cell in row:
                             cell.font = Font(name='Arial', size=10)
-                            cell.border = Border() 
+                            cell.border = Border() # 徹底移除框線
                             if r_idx == 0:
                                 cell.alignment = Alignment(horizontal='left')
 
                 st.session_state.processed = True
                 st.success(f"✅ 處理完成！日期：{today_str}")
-                st.download_button("📥 下載檔案 ", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
+                st.download_button("📥 下載檔案 (無框線版)", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
                 # E. Gmail 範本產出區
                 st.write("---")
@@ -163,10 +175,7 @@ if has_gen and has_lian:
                 # 1. 總出口明細草稿
                 sub_main = f"{today_str} 信天翁 to MO (出口明細)"
                 total_count = len(combined[combined['提單號碼'].str.strip() != ''])
-                
-                # 已經將多餘的一句話移除
                 body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_sum_text}\n簡報：{sim_sum_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
-                
                 url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_all}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
                 st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 1. 總出口明細草稿</a>', unsafe_allow_html=True)
 
