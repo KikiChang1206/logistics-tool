@@ -52,37 +52,45 @@ if has_gen and has_lian:
                 df_c = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
-                # C. 統計與首筆提單號碼抓取邏輯
+                # C. 全新精確統計邏輯 (逐行嚴格檢查，解決吃行問題)
                 def get_stats_v2(df, pos_keys, sim_keys):
                     pos_info, sim_info = {}, {}
-                    i, max_len = 0, len(df)
-                    while i < max_len:
-                        val_a = str(df.iloc[i]['報關']).strip()
-                        is_pos = any(k in val_a for k in pos_keys)
-                        is_sim = any(k in val_a for k in sim_keys)
-                        
-                        if is_pos or is_sim:
-                            sender = str(df.iloc[i]['寄件人']).strip()
-                            if sender == "":
-                                for j in range(i, max_len):
-                                    if str(df.iloc[j]['寄件人']).strip() != "":
-                                        sender = str(df.iloc[j]['寄件人']).strip()
-                                        break
-                            short_sender = sender.replace("有限公司","").replace("股份有限公司","").replace("生醫國際","")
-                            
-                            # 關鍵：抓取該區塊的第一筆提單號碼
-                            first_hawb = str(df.iloc[i]['提單號碼']).strip()
-                            
-                            count = 0
-                            while i < max_len:
-                                if str(df.iloc[i]['提單號碼']).strip() == "": break
-                                count += 1; i += 1
-                            
-                            target_dict = pos_info if is_pos else sim_info
-                            if short_sender not in target_dict:
-                                target_dict[short_sender] = {"count": 0, "first_hawb": first_hawb}
-                            target_dict[short_sender]["count"] += count
-                        else: i += 1
+                    current_dict = None
+                    current_sender = None
+
+                    for i in range(len(df)):
+                        row = df.iloc[i]
+                        hawb = str(row['提單號碼']).strip()
+                        if hawb == "":
+                            continue  # 略過完全空白行
+
+                        type_val = str(row['報關']).strip()
+                        sender_val = str(row['寄件人']).strip()
+
+                        if type_val != "":
+                            # 若這行有寫報關類型，判斷是正報還簡報
+                            is_pos = any(k in type_val for k in pos_keys)
+                            is_sim = any(k in type_val for k in sim_keys)
+
+                            if is_pos or is_sim:
+                                current_dict = pos_info if is_pos else sim_info
+                                # 處理第一行寄件人可能空白的問題
+                                if sender_val == "":
+                                    for j in range(i, len(df)):
+                                        if str(df.iloc[j]['寄件人']).strip() != "":
+                                            sender_val = str(df.iloc[j]['寄件人']).strip()
+                                            break
+
+                        # 更新目前處理的寄件人 (過濾多餘字眼)
+                        if sender_val != "":
+                            current_sender = sender_val.replace("股份有限公司","").replace("有限公司","").replace("生醫國際","").replace("開發股份","").replace("國際","").strip()
+
+                        # 累加件數與紀錄首筆單號
+                        if current_dict is not None and current_sender is not None:
+                            if current_sender not in current_dict:
+                                current_dict[current_sender] = {"count": 0, "first_hawb": hawb}
+                            current_dict[current_sender]["count"] += 1
+
                     return pos_info, sim_info
 
                 stats_pos, stats_sim = get_stats_v2(df_c, ["正式報關", "合併正報"], ["簡易報關", "合併簡報"])
@@ -104,15 +112,30 @@ if has_gen and has_lian:
                 combined[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = combined.apply(lookup, axis=1)
 
                 final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
-                spaced_rows, last_type = [], None
+                
+                spaced_rows = []
+                last_type = None
+
+                # 全新斷行邏輯：只要報關類型有出現字，就強制斷行 (除非是連續的不報關)
                 for _, row in combined.iterrows():
-                    curr = str(row['報關']).strip()
-                    if last_type is not None and curr != last_type and curr != "":
-                        spaced_rows.append(pd.Series([None] * len(final_cols), index=final_cols))
+                    curr_type = str(row['報關']).strip()
+
+                    if len(spaced_rows) > 0:
+                        if curr_type != "":
+                            if curr_type == "不報關" and last_type == "不報關":
+                                pass # 連續的不報關不強制斷行
+                            else:
+                                spaced_rows.append(pd.Series([None] * len(final_cols), index=final_cols))
+
                     disp = row.copy()
-                    if curr == "不報關" and last_type == "不報關": disp['報關'] = ""
+                    if curr_type == "不報關" and last_type == "不報關":
+                        disp['報關'] = ""
+                    
                     spaced_rows.append(disp)
-                    last_type = curr
+                    
+                    if curr_type != "":
+                        last_type = curr_type
+
                 df_final = pd.DataFrame(spaced_rows).fillna('')[final_cols]
 
                 out = BytesIO()
@@ -122,9 +145,7 @@ if has_gen and has_lian:
                     for r_idx, row in enumerate(ws.iter_rows()):
                         for cell in row:
                             cell.font = Font(name='Arial', size=10)
-                            # --- 核心修改：徹底移除框線 ---
                             cell.border = Border() 
-                            # ---------------------------
                             if r_idx == 0:
                                 cell.alignment = Alignment(horizontal='left')
 
@@ -142,7 +163,10 @@ if has_gen and has_lian:
                 # 1. 總出口明細草稿
                 sub_main = f"{today_str} 信天翁 to MO (出口明細)"
                 total_count = len(combined[combined['提單號碼'].str.strip() != ''])
+                
+                # 已經將多餘的一句話移除
                 body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_sum_text}\n簡報：{sim_sum_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
+                
                 url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_all}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
                 st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 1. 總出口明細草稿</a>', unsafe_allow_html=True)
 
@@ -153,7 +177,6 @@ if has_gen and has_lian:
                     cc_sub = "gmop@goodmaji.com"
                     for idx, (brand, data) in enumerate(sorted(all_brand_info.items()), 2):
                         sub_brand = f"{today_str} 信天翁 to MO ( {brand} 文件)"
-                        # 依照需求：內文第一行放首筆單號
                         body_brand = f"Dears,\n\n{data['first_hawb']}\n{brand}報關文件如附檔，請您協助申報，感恩"
                         url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_sub}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
                         st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 {idx}. 報關草稿：{brand}</a>', unsafe_allow_html=True)
