@@ -216,13 +216,13 @@ if has_gen and has_lian:
                         sub_brand = f"{today_str} 信天翁 to MO ( {brand} 文件)"
                         body_brand = f"Dears,\n\n{data['first_hawb']}\n{brand}報關文件如附檔，請您協助申報，感恩"
 
-                        # ★★★ 新功能 2 & 3：特定廠商自動加註 ★★★
-                        if any(k in brand for k in ["蜜凱", "綺麗絲"]):
-                            body_brand += "\n1元做銷售02"
-                        elif "大研" in brand:
-                            body_brand += "\n1元做贈品04"
-
                         url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_sub}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
                         st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 {idx}. 報關草稿：{brand}</a>', unsafe_allow_html=True)
+
+                        # ★★★ 新功能 2 & 3：特定廠商在畫面上用紅字粗體提醒 (不放進信件內文) ★★★
+                        if any(k in brand for k in ["蜜凱", "綺麗絲"]):
+                            st.markdown('<p style="color:#FF0000; font-weight:bold; margin-top:2px;">⚠️ 提醒：1元做銷售02</p>', unsafe_allow_html=True)
+                        elif "大研" in brand:
+                            st.markdown('<p style="color:#FF0000; font-weight:bold; margin-top:2px;">⚠️ 提醒：1元做贈品04</p>', unsafe_allow_html=True)
 
         except Exception as e: st.error(f"錯誤: {e}")
