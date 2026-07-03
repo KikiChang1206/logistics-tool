@@ -52,6 +52,17 @@ if has_gen and has_lian:
                 df_c = pd.read_excel(lian_file, sheet_name='報關明細', dtype=str).fillna('')
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
+                # ★★★ 修正處 1：欄位名稱去除前後空白，避免因空白差異抓不到欄位 ★★★
+                df_c.columns = df_c.columns.str.strip()
+                df_n.columns = df_n.columns.str.strip()
+
+                # ★★★ 修正處 2：若「不報關-X7明細」分頁是空的、或缺少必要欄位，
+                # 就補上一個空的「提單號碼」欄位，讓後面程式碼可以正常運作，而不是報錯 ★★★
+                required_cols_n = ['提單號碼', '報關', '寄件人']
+                for col in required_cols_n:
+                    if col not in df_n.columns:
+                        df_n[col] = ''
+
                 # C. 全新精確統計邏輯 (逐行嚴格檢查，解決吃行問題)
                 def get_stats_v2(df, pos_keys, sim_keys):
                     pos_info, sim_info = {}, {}
@@ -74,7 +85,7 @@ if has_gen and has_lian:
 
                             if is_pos or is_sim:
                                 current_dict = pos_info if is_pos else sim_info
-                                
+
                         # 若第一行寄件人空白，往下找到同區塊的第一個寄件人
                         if sender_val == "" and current_dict is not None:
                             for j in range(i, len(df)):
@@ -114,7 +125,17 @@ if has_gen and has_lian:
                 combined[["CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]] = combined.apply(lookup, axis=1)
 
                 final_cols = ['報關', '好馬吉袋號', '袋號', '編號', '提單號碼', '發票號碼', '件數', '提單重量(KG)', '品名', '中文品名', '數量', '單位', '產地', '單價(TWD)', '寄件公司/統編', '寄件人', '電話', '寄件人地址', '統計方式', '商標', "CONSIGNEE'S NAME", "CONSIGNEE'S ADDRESS", "PostCode", "CONSIGNEE'S TEL"]
-                
+
+                # ★★★ 修正處 3：若聯郵檔案裡缺少 final_cols 中的某些欄位，先補空欄，避免選取欄位時出錯 ★★★
+                for col in final_cols:
+                    if col not in combined.columns:
+                        combined[col] = ''
+
+                # ★★★ 新功能 1：檢查「品名」「中文品名」是否有缺漏 ★★★
+                missing_mask = (combined['品名'].astype(str).str.strip() == '') | (combined['中文品名'].astype(str).str.strip() == '')
+                missing_hawb_list = combined.loc[missing_mask, '提單號碼'].astype(str).str.strip().tolist()
+                missing_hawb_list = [h for h in missing_hawb_list if h != '']
+
                 spaced_rows = []
                 last_type = None
                 last_sender = None
@@ -142,9 +163,9 @@ if has_gen and has_lian:
                     disp = row.copy()
                     if curr_type == "不報關" and last_type == "不報關":
                         disp['報關'] = ""
-                    
+
                     spaced_rows.append(disp)
-                    
+
                     if curr_type != "": last_type = curr_type
                     if curr_sender != "": last_sender = curr_sender
 
@@ -165,17 +186,24 @@ if has_gen and has_lian:
                 st.success(f"✅ 處理完成！日期：{today_str}")
                 st.download_button("📥 下載檔案 (無框線版)", out.getvalue(), f"{today_str}_信天翁 TO MO_Manifest.xlsx", use_container_width=True)
 
+                # ★★★ 新功能 1：品名 / 中文品名 缺漏提醒 ★★★
+                if missing_hawb_list:
+                    st.warning(f"⚠️ 品名資料有缺少，請補資料\n\n缺漏的提單號碼：{'、'.join(missing_hawb_list)}")
+
                 # E. Gmail 範本產出區
                 st.write("---")
                 st.write("### 📧 Gmail 草稿清單")
-                
+
                 to_all = "twnalex2009@gmail.com,twnalex24471640.01@gmail.com"
                 cc_all = "gmcs@goodmaji.com,gmop@goodmaji.com,gmfa@goodmaji.com,bdm@goodmaji.com"
-                
+
                 # 1. 總出口明細草稿
                 sub_main = f"{today_str} 信天翁 to MO (出口明細)"
                 total_count = len(combined[combined['提單號碼'].str.strip() != ''])
-                body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_sum_text}\n簡報：{sim_sum_text}\n不報關：{len(df_n[df_n['提單號碼'].str.strip() != ''])} 件"
+                # ★★★ 修正處 4：不報關件數改用「提單號碼」不為空白的行數計算，
+                # 這樣即使 df_n 原本是空的，也會正確算出 0 件，而不是報錯 ★★★
+                no_declare_count = len(df_n[df_n['提單號碼'].astype(str).str.strip() != ''])
+                body_main = f"Dears\n\n今日出口明細如附檔，共 {total_count} 件\n請再協助申報，並安排出口，謝謝\n\n正報：{pos_sum_text}\n簡報：{sim_sum_text}\n不報關：{no_declare_count} 件"
                 url_main = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_all}&su={urllib.parse.quote(sub_main)}&body={urllib.parse.quote(body_main)}"
                 st.markdown(f'<a href="{url_main}" target="_blank" class="email-btn">📧 1. 總出口明細草稿</a>', unsafe_allow_html=True)
 
@@ -187,6 +215,13 @@ if has_gen and has_lian:
                     for idx, (brand, data) in enumerate(sorted(all_brand_info.items()), 2):
                         sub_brand = f"{today_str} 信天翁 to MO ( {brand} 文件)"
                         body_brand = f"Dears,\n\n{data['first_hawb']}\n{brand}報關文件如附檔，請您協助申報，感恩"
+
+                        # ★★★ 新功能 2 & 3：特定廠商自動加註 ★★★
+                        if any(k in brand for k in ["蜜凱", "綺麗絲"]):
+                            body_brand += "\n1元做銷售02"
+                        elif "大研" in brand:
+                            body_brand += "\n1元做贈品04"
+
                         url_brand = f"https://mail.google.com/mail/?view=cm&fs=1&to={to_all}&cc={cc_sub}&su={urllib.parse.quote(sub_brand)}&body={urllib.parse.quote(body_brand)}"
                         st.markdown(f'<a href="{url_brand}" target="_blank" class="email-btn-sub">📩 {idx}. 報關草稿：{brand}</a>', unsafe_allow_html=True)
 
