@@ -53,8 +53,8 @@ if has_gen and has_lian:
                 df_n = pd.read_excel(lian_file, sheet_name='不報關-X7明細', dtype=str).fillna('')
 
                 # ★★★ 修正處 1：欄位名稱去除前後空白，避免因空白差異抓不到欄位 ★★★
-                df_c.columns = df_c.columns.str.strip()
-                df_n.columns = df_n.columns.str.strip()
+                df_c.columns = df_c.columns.astype(str).str.strip()
+                df_n.columns = df_n.columns.astype(str).str.strip()
 
                 # ★★★ 修正處 2：若「不報關-X7明細」分頁是空的、或缺少必要欄位，
                 # 就補上一個空的「提單號碼」欄位，讓後面程式碼可以正常運作，而不是報錯 ★★★
@@ -113,7 +113,7 @@ if has_gen and has_lian:
                 # D. 產出 Excel
                 df_n['報關'] = "不報關"
                 combined = pd.concat([df_c, df_n], ignore_index=True)
-                combined = combined[combined['提單號碼'].str.strip() != '']
+                combined = combined[combined['提單號碼'].astype(str).str.strip() != '']
 
                 def lookup(r):
                     h = str(r['提單號碼']).strip()
@@ -199,7 +199,7 @@ if has_gen and has_lian:
 
                 # 1. 總出口明細草稿
                 sub_main = f"{today_str} 信天翁 to MO (出口明細)"
-                total_count = len(combined[combined['提單號碼'].str.strip() != ''])
+                total_count = len(combined[combined['提單號碼'].astype(str).str.strip() != ''])
                 # ★★★ 修正處 4：不報關件數改用「提單號碼」不為空白的行數計算，
                 # 這樣即使 df_n 原本是空的，也會正確算出 0 件，而不是報錯 ★★★
                 no_declare_count = len(df_n[df_n['提單號碼'].astype(str).str.strip() != ''])
